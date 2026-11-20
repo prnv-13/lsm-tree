@@ -50,10 +50,11 @@ src/main/java/lsm/
   Value.java       value or tombstone (done)
   Memtable.java    steps 1–3
   SSTable.java     step 4
-  LSMTree.java     step 5
+  LSMTree.java     steps 5–6
+  Compactor.java   step 6
   Main.java        runs the example above
 src/test/java/lsm/
-  Step1MemtableTest … Step5LSMTreeTest
+  Step1MemtableTest … Step6CompactionTest
 ```
 
 ## Steps
@@ -68,6 +69,7 @@ Make each step's tests pass before moving on.
 | 3 | `Memtable.isFull`, `toSSTable` | `Step3FlushTest` |
 | 4 | `SSTable.get` | `Step4SSTableTest` |
 | 5 | `LSMTree.insert`, `delete`, `select`, `flushIfFull` | `Step5LSMTreeTest` |
+| 6 | `Compactor.merge`, `LSMTree.compact` | `Step6CompactionTest` |
 
 ```bash
 mvn test
@@ -90,9 +92,35 @@ mvn compile exec:java -Dexec.mainClass=lsm.Main
 5. `select` searches newest to oldest. Choose which end of the SSTable list is newest and stay consistent.
 6. At each layer there are three outcomes: a value, a tombstone, or nothing. Decide what each one means before writing the loop.
 
+## Compaction (Step 6)
+
+Every flush adds an SSTable, so reads get slower and deleted or overwritten data is never reclaimed.
+Compaction merges SSTables into one.
+
+```
+SST1 [1:a, 2:b]      SST2 [1:☠, 3:c]      SST3 [2:z]
+                         │
+               compact() │  newest wins per key, tombstones dropped
+                         ▼
+                  SST  [2:z, 3:c]
+```
+
+- `Compactor.merge(tables, dropTombstones)` takes tables ordered **oldest to newest** and returns one sorted SSTable.
+- For each key, only the entry from the newest table survives.
+- `dropTombstones` decides whether tombstones (and the values they hide) are removed or kept.
+- `LSMTree.compact()` merges **all** SSTables into one. The memtable is not touched.
+  If the merged table is empty, the tree ends up with no SSTables.
+
+### Hints
+
+7. Start simple: walk the tables oldest to newest and put every entry into a sorted map, so newer entries overwrite older ones. Then build the SSTable from the map.
+8. The real version is a **k-way merge**: every table is already sorted, so keep one cursor per table and a `PriorityQueue` of the smallest current keys. When two tables have the same key, which one wins?
+9. When is it safe to drop a tombstone? Ask what could still be *older* than the merged result. Why would dropping one during a partial merge (only the newest few tables) bring deleted data back?
+10. Why doesn't compaction need to look at the memtable?
+
 ## Stretch goals
 
-- [ ] **Compaction**: merge SSTables into one (k-way merge, newest wins). When is it safe to drop a tombstone?
+- [ ] **Automatic compaction**: compact when the number of SSTables passes a threshold.
 - [ ] **Range scan**: `scan(lo, hi)` across all layers, respecting tombstones.
 - [ ] **Bloom filter** per SSTable to skip tables that can't contain the key.
 - [ ] **Write-ahead log** so the memtable survives a crash.
