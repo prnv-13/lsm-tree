@@ -3,6 +3,13 @@
 A small generic key-value store built on a **Log-Structured Merge tree**, with a
 memtable, immutable SSTables and tombstones for deletes.
 
+## Requirements
+
+- **JDK 27** (`java -version` should report 27)
+- **Maven 3.9+**, or IntelliJ IDEA with the bundled Maven
+
+In IntelliJ, set File → Project Structure → Project → SDK to 27 and the language level to 27.
+
 ## Problem
 
 ```java
