@@ -3,6 +3,7 @@ package lsm;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 public class LSMTree<K extends Comparable<K>, V> {
 
@@ -59,6 +60,26 @@ public class LSMTree<K extends Comparable<K>, V> {
         final var merged = Compactor.merge(sstables, true);
         sstables.clear();
         if (merged.size() != 0) sstables.add(merged);
+    }
+
+    // live keys with lo <= key < hi, sorted, newest value wins
+    public List<Map.Entry<K, V>> scan(K lo, K hi) {
+
+        final var sstTables = new ArrayList<SSTable<K, V>>();
+        for (var table : this.sstables) {
+            sstTables.add(table.range(lo, hi));
+        }
+        sstTables.add(memtable.range(lo, hi));
+        final var compacted = Compactor.merge(sstTables, true);
+
+        if (compacted.size() == 0) return List.of();
+
+        List<Map.Entry<K, V>> answer = new ArrayList<>();
+        for (int i = 0; i < compacted.size(); i++) {
+            answer.add(Map.entry(compacted.keyAt(i), compacted.valueAt(i).data()));
+        }
+
+        return answer;
     }
 
     int sstableCount() {

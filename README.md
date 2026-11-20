@@ -11,6 +11,8 @@ LSMTree<K extends Comparable<K>, V>
 void insert(K key, V value)  // add or overwrite
 V    select(K key)           // latest value, or null if missing/deleted
 void delete(K key)           // remove
+void compact()               // merge all SSTables into one
+List<Map.Entry<K, V>> scan(K lo, K hi)  // live keys in [lo, hi), sorted
 ```
 
 | Component | Role |
@@ -48,13 +50,13 @@ select(42)       → null
 ```
 src/main/java/lsm/
   Value.java       value or tombstone (done)
-  Memtable.java    steps 1–3
-  SSTable.java     step 4
-  LSMTree.java     steps 5–6
+  Memtable.java    steps 1–3, 7
+  SSTable.java     steps 4, 7
+  LSMTree.java     steps 5–7
   Compactor.java   step 6
   Main.java        runs the example above
 src/test/java/lsm/
-  Step1MemtableTest … Step6CompactionTest
+  Step1MemtableTest … Step7RangeScanTest
 ```
 
 ## Steps
@@ -70,6 +72,7 @@ Make each step's tests pass before moving on.
 | 4 | `SSTable.get` | `Step4SSTableTest` |
 | 5 | `LSMTree.insert`, `delete`, `select`, `flushIfFull` | `Step5LSMTreeTest` |
 | 6 | `Compactor.merge`, `LSMTree.compact` | `Step6CompactionTest` |
+| 7 | `SSTable.range`, `Memtable.range`, `LSMTree.scan` | `Step7RangeScanTest` |
 
 ```bash
 mvn test
@@ -118,10 +121,37 @@ SST1 [1:a, 2:b]      SST2 [1:☠, 3:c]      SST3 [2:z]
 9. When is it safe to drop a tombstone? Ask what could still be *older* than the merged result. Why would dropping one during a partial merge (only the newest few tables) bring deleted data back?
 10. Why doesn't compaction need to look at the memtable?
 
+## Range scan (Step 7)
+
+`scan(lo, hi)` returns every live key with `lo <= key < hi`, sorted, with its newest value.
+Deleted keys are left out. It reads the memtable and every SSTable.
+
+```
+insert(1,"a") insert(3,"c")   → SST1 [1:a, 3:c]
+insert(2,"b") insert(3,"C")   → SST2 [2:b, 3:C]
+delete(2)     insert(5,"e")   → SST3 [2:☠, 5:e]
+insert(4,"d")                 → memtable {4:d}
+
+scan(1, 5)  → [1:a, 3:C, 4:d]
+scan(0, 99) → [1:a, 3:C, 4:d, 5:e]
+scan(3, 3)  → []
+```
+
+- `SSTable.range(lo, hi)` returns the entries in `[lo, hi)` as a new SSTable, tombstones included.
+- `Memtable.range(lo, hi)` does the same for the memtable, sorted.
+- `lo >= hi` always gives an empty result.
+
+### Hints
+
+11. This is compaction again: each layer gives its keys in the range, then you merge, the newest wins, and tombstones are dropped. Can you reuse `Compactor.merge`?
+12. Don't read whole SSTables. The keys in `[lo, hi)` form one block. When `binarySearch` misses, `-(i + 1)` is where the key would go. Use it for both ends, then look at `List.subList`.
+13. The memtable is a `HashMap`, so it has no order. Filter and sort, or switch to a `TreeMap` and use `subMap`? Compare the cost of `put`, `get` and `scan` for each. If you use `subMap`, read what it does when `lo > hi`.
+14. Where does the memtable go in the oldest-to-newest list you pass to `merge`?
+15. Is it safe to drop tombstones here? Compaction could only drop them because nothing older existed.
+
 ## Stretch goals
 
 - [ ] **Automatic compaction**: compact when the number of SSTables passes a threshold.
-- [ ] **Range scan**: `scan(lo, hi)` across all layers, respecting tombstones.
 - [ ] **Bloom filter** per SSTable to skip tables that can't contain the key.
 - [ ] **Write-ahead log** so the memtable survives a crash.
 - [ ] **Persist SSTables to disk.**

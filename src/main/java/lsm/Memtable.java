@@ -5,7 +5,7 @@ import java.util.*;
 public class Memtable<K extends Comparable<K>, V> {
 
     private final int capacity;
-    private final Map<K, Value<V>> entries = new HashMap<>();
+    private final TreeMap<K, Value<V>> entries = new TreeMap<>();
 
     public Memtable(int capacity) {
         if (capacity <= 0) {
@@ -36,13 +36,22 @@ public class Memtable<K extends Comparable<K>, V> {
     }
 
     public SSTable<K, V> toSSTable() {
+
         final var keys = new ArrayList<>(entries.keySet());
-        Collections.sort(keys);
+        final var valueList = new ArrayList<>(entries.values());
 
-        int size = keys.size();
-        List<Value<V>> valueList = new ArrayList<>(size);
+        return new SSTable<>(keys, valueList);
+    }
 
-        for (K key : keys) valueList.add(get(key));
+    // sorted entries with lo <= key < hi, tombstones included
+    public SSTable<K, V> range(K lo, K hi) {
+
+        if (lo.compareTo(hi) >= 0) return new SSTable<K, V>(List.<K>of(), List.<Value<V>>of());
+        final var subMap = entries.subMap(lo, hi);
+
+        final var keys = new ArrayList<>(subMap.keySet());
+        final var valueList = new ArrayList<>(subMap.values());
+
         return new SSTable<>(keys, valueList);
     }
 }

@@ -28,6 +28,23 @@ public final class SSTable<K extends Comparable<K>, V> {
         return valueAt(i);
     }
 
+    // entries with lo <= key < hi, tombstones included
+    public SSTable<K, V> range(K lo, K hi) {
+
+        if (lo.compareTo(hi) >= 0) return new SSTable<K, V>(List.<K>of(), List.<Value<V>>of());
+
+        int loIdx = Collections.binarySearch(keys, lo);
+        if (loIdx < 0) loIdx = -(loIdx + 1);
+
+        int hiIdx = Collections.binarySearch(keys, hi);
+        if (hiIdx < 0) hiIdx = -(hiIdx + 1);
+
+        final var subKeys = keys.subList(loIdx, hiIdx);
+        final var subValues = values.subList(loIdx, hiIdx);
+
+        return new SSTable<>(subKeys, subValues);
+    }
+
     public int size() {
         return keys.size();
     }
