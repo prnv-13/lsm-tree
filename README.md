@@ -24,8 +24,8 @@ List<Map.Entry<K, V>> scan(K lo, K hi)  // live keys in [lo, hi), sorted
 
 | Component | Role |
 |---|---|
-| **Memtable** | In-memory `HashMap<K, Value<V>>` that receives every write. Holds at most `N` entries. |
-| **SSTable** | Immutable, sorted run of entries, created when a full memtable is flushed. |
+| **Memtable** | In-memory `TreeMap<K, Value<V>>` that receives every write. Holds at most `N` entries. |
+| **SSTable** | Immutable, sorted run of entries, created when a full memtable is flushed. Has a Bloom filter of its keys. |
 | **Value** | Wraps a stored value. `Value.tombstone()` marks a deleted key. |
 
 ### Rules
@@ -58,12 +58,13 @@ select(42)       → null
 src/main/java/lsm/
   Value.java       value or tombstone (done)
   Memtable.java    steps 1–3, 7
-  SSTable.java     steps 4, 7
+  SSTable.java     steps 4, 7, 8
   LSMTree.java     steps 5–7
   Compactor.java   step 6
+  BloomFilter.java step 8
   Main.java        runs the example above
 src/test/java/lsm/
-  Step1MemtableTest … Step7RangeScanTest
+  Step1MemtableTest … Step8BloomFilterTest
 ```
 
 ## Steps
@@ -80,6 +81,7 @@ Make each step's tests pass before moving on.
 | 5 | `LSMTree.insert`, `delete`, `select`, `flushIfFull` | `Step5LSMTreeTest` |
 | 6 | `Compactor.merge`, `LSMTree.compact` | `Step6CompactionTest` |
 | 7 | `SSTable.range`, `Memtable.range`, `LSMTree.scan` | `Step7RangeScanTest` |
+| 8 | `BloomFilter`, `SSTable.mightContain`, filter in `SSTable` constructor and `get` | `Step8BloomFilterTest` |
 
 ```bash
 mvn test
@@ -156,9 +158,42 @@ scan(3, 3)  → []
 14. Where does the memtable go in the oldest-to-newest list you pass to `merge`?
 15. Is it safe to drop tombstones here? Compaction could only drop them because nothing older existed.
 
+## Bloom filter (Step 8)
+
+A miss on `select` has to binary-search every SSTable. A Bloom filter lets each table answer
+"definitely not here" without searching.
+
+| `mightContain(key)` | Meaning |
+|---|---|
+| `false` | Definitely not in the table. Skip it. |
+| `true` | Probably in the table. Binary-search it. |
+
+False positives are allowed. False negatives never are.
+
+```
+SST1 [1, 3, 5]   SST2 [2, 4, 6]   SST3 [7, 8, 9]
+
+select(42): SST3 no, SST2 no, SST1 no        → null, 0 binary searches
+select(4):  SST3 no, SST2 maybe → search     → found
+```
+
+- `BloomFilter(expectedItems, falsePositiveRate)` sizes itself from the formulas below. It rejects `expectedItems < 0` and a rate outside `(0, 1)`.
+- Each `SSTable` builds its filter in the constructor with a **1%** false positive rate, and never changes it.
+- `SSTable.get` checks the filter before searching.
+- Deletes never touch a filter. A tombstone is a key in its table, so it goes in that table's filter.
+  Keys only leave a filter when compaction builds a new table.
+
+### Hints
+
+16. Add **every** key to the filter, tombstones included. Trace what `select` does if a newer table holds `1:☠` but its filter says no.
+17. You need k hash functions. Compute `h1` and `h2` from the key, then use `h1 + i * h2` for `i = 0..k-1`, mod the number of bits. See `java.util.BitSet`.
+18. `Integer.hashCode()` is the integer itself, so it spreads poorly. Mix its bits first (look up "murmur3 fmix32").
+19. For `n` items and rate `p`: bits `m = -n·ln(p) / (ln 2)²`, hashes `k = (m/n)·ln 2`. What should happen when `n = 0`?
+20. `h1 + i * h2` can overflow and go negative, and `%` keeps the sign. How do you get a valid index?
+21. Do `compact`, `scan` and `range` need changes? Where do they create SSTables?
+
 ## Stretch goals
 
 - [ ] **Automatic compaction**: compact when the number of SSTables passes a threshold.
-- [ ] **Bloom filter** per SSTable to skip tables that can't contain the key.
 - [ ] **Write-ahead log** so the memtable survives a crash.
 - [ ] **Persist SSTables to disk.**

@@ -5,8 +5,11 @@ import java.util.List;
 
 public final class SSTable<K extends Comparable<K>, V> {
 
+    private static final double DEFAULT_FALSE_POSITIVE_RATE = 0.01;
+
     private final List<K> keys;
     private final List<Value<V>> values;
+    private final BloomFilter<K> bloomFilter;
 
     public SSTable(List<K> keys, List<Value<V>> values) {
         if (keys.size() != values.size()) {
@@ -19,13 +22,22 @@ public final class SSTable<K extends Comparable<K>, V> {
         }
         this.keys = List.copyOf(keys);
         this.values = List.copyOf(values);
+        this.bloomFilter = new BloomFilter<>(keys.size(), DEFAULT_FALSE_POSITIVE_RATE);
+        setBloomFilter(this.keys);
     }
 
     // null if the key is absent
     public Value<V> get(K key) {
+
+        if (!mightContain(key)) return null;
+
         int i = Collections.binarySearch(keys, key);
         if (i < 0) return null;
         return valueAt(i);
+    }
+
+    public boolean mightContain(K key) {
+        return bloomFilter.mightContain(key);
     }
 
     // entries with lo <= key < hi, tombstones included
@@ -55,5 +67,9 @@ public final class SSTable<K extends Comparable<K>, V> {
 
     Value<V> valueAt(int index) {
         return values.get(index);
+    }
+
+    private void setBloomFilter(List<K> keys) {
+        for (K key : keys) bloomFilter.add(key);
     }
 }
