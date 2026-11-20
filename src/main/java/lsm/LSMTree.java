@@ -1,6 +1,7 @@
 package lsm;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 public class LSMTree<K extends Comparable<K>, V> {
@@ -54,7 +55,17 @@ public class LSMTree<K extends Comparable<K>, V> {
         }
     }
 
+    public void compact() {
+        final var merged = Compactor.merge(sstables, true);
+        sstables.clear();
+        if (merged.size() != 0) sstables.add(merged);
+    }
+
     int sstableCount() {
         return sstables.size();
+    }
+
+    SSTable<K, V> sstableAt(int index) {
+        return sstables.get(index);
     }
 }
